@@ -32,19 +32,6 @@ def plot_data(xs):
     plt.plot(range(len(xs)), xs)
     plt.show()
 
-# NOT USED: gets lower outliers of dataset using IQR
-def find_outliers(xs):
-    q1, q3 = np.percentile(xs,[25,75])
-    iqr = q3 - q1
-    #print("IQR:", iqr)
-    acceptable_range = q1 - (1.5*iqr)
-    #print("Acceptable range:", acceptable_range)
-    outliers = []
-    for x in xs:
-        if x < acceptable_range:
-            outliers.append(x)
-    return outliers
-
 # Get magnitude of row by using Pythagorean on x,y,z (1,2,3) IMU data
 def get_magnitude(row):
     return ( (row[1]**2) + (row[2]**2) + (row[3]**2) )**(0.5)
@@ -57,10 +44,18 @@ gyro_data = read_data(gyro_filename)
 
 # ---- Filter & count steps from acc_data----
 acc_data_mags = [get_magnitude(row) for row in acc_data]
+# Plot acc magnitudes
+plt.plot(acc_data_mags[:10000])
+plt.show()
+
 filtered_data = low_pass_filter(acc_data_mags)
 # threshold gives allowed vertical distance between a peak and its surrounding samples
 (peaks_indices, props) = find_peaks(filtered_data, threshold=0.0001)
 peaks = [filtered_data[i] for i in peaks_indices]
+(valleys_indices, props) = find_peaks(-1*filtered_data, threshold=0.0001)
+valleys = [filtered_data[i] for i in valleys_indices]
 num_steps = len(peaks)
+num_valleys = len(valleys)
 
-print(num_steps, "steps")
+print(num_steps, "peaks")
+print(num_valleys, "valleys")
