@@ -119,8 +119,8 @@ def matrix_to_axis(A):
     return axis / la.norm(axis)
 
 # ---- Read in data ----
-acc_filename = "./data_imu_loc/route1/Accelerometer.csv"
-gyro_filename = "./data_imu_loc/route1/Gyroscope.csv"
+acc_filename = "./data_imu_loc/route2/Accelerometer.csv"
+gyro_filename = "./data_imu_loc/route2/Gyroscope.csv"
 acc_data = read_data(acc_filename)
 gyro_data = read_data(gyro_filename)
 
