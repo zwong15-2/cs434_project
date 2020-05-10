@@ -15,6 +15,8 @@ f_cutoff = 2
 f_cutoff_ratio = f_cutoff / f_nyquist
 order = 2
 delta_t = 0.01
+acc_filename = "./data_imu_loc/route1/Accelerometer.csv"
+gyro_filename = "./data_imu_loc/route1/Gyroscope.csv"
 
 def read_data(file_name):
     data = []
@@ -98,29 +100,27 @@ def integrate_gyros(gyro_data, R_init):
     delta_Ri = R_init
     for l in gyro_data:
         delta_theta = np.sqrt(l[0]**2 + l[1]**2 + l[2]**2) * delta_t
-        # Project instant rotation axis l into global frame
+        # For now, DON'T project instant rotation axis l into global frame
         proj_l = l
         new_delta_Ri = axis_angle_to_matrix(proj_l, delta_theta)
         # R(i+1) = delta_Ri * Ri
         delta_Ri = delta_Ri @ new_delta_Ri
     return delta_Ri
 
-def matrix_to_axis(A):
-    a = A[0,0]
-    b = A[0,1]
-    c = A[0,2]
-    d = A[1,0]
-    e = A[1,1]
-    f = A[1,2]
-    g = A[2,0]
-    h = A[2,1]
-    i = A[2,2]
+def matrix_to_axis_angle(A):
+    a,b,c = A[0,0],A[0,1],A[0,2]
+    d,e,f = A[1,0],A[1,1],A[1,2]
+    g,h,i = A[2,0],A[2,1],A[2,2]
     axis = np.array([h-f, c-g, d-b])
-    return axis / la.norm(axis)
+    angle = np.arcsin(la.norm(axis) / 2)
+    axis = axis / la.norm(axis)
+    return (axis,angle)
+
+def get_step_length_from_angle(angle):
+    return 0.762*angle
+
 
 # ---- Read in data ----
-acc_filename = "./data_imu_loc/route2/Accelerometer.csv"
-gyro_filename = "./data_imu_loc/route2/Gyroscope.csv"
 acc_data = read_data(acc_filename)
 gyro_data = read_data(gyro_filename)
 
@@ -155,7 +155,9 @@ step_times = [acc_data[i][0] for i in step_indices]
 locs = []
 locs.append(np.array([0,0,0]))
 delta_R = R0
-# For each 2 successive steps for the leg,
+all_gyros = []
+
+# For each 2 successive steps for the leg, ...
 for i in range(len(step_times) - 1):
     # Get all gyro readings between those 2 steps
     gyros = get_gyro_readings_between_times(step_times[i], step_times[i+1])
@@ -163,14 +165,13 @@ for i in range(len(step_times) - 1):
     gyros = [gyro[1:] for gyro in gyros]
     delta_R = integrate_gyros(gyros, delta_R)
     # Express that as axis-angle
-    axis = matrix_to_axis(delta_R)
-    # Get orthogonal vector -> this is walking direction for that step
-    # (for now I'm just gonna use the axis)
+    (axis,angle) = matrix_to_axis_angle(delta_R)
+    # Get orthogonal vector -> this is walking direction for that (for now I'm just gonna use the axis)
     walking_dir = np.array(axis)
     walking_dir = walking_dir / la.norm(walking_dir)
+    print('Axis:', axis, '\t', 'Angle:', angle)
+    step_length = get_step_length_from_angle(angle)
     # Multiply that walking direction w/ step length
-    # (for now I'm just gonna assume step length of 0.5m)
-    step_length = 0.5
     disp_of_step = step_length * walking_dir
     locs.append(locs[i] + disp_of_step)
 
@@ -178,4 +179,4 @@ locs = np.array(locs)
 plt.plot(locs[:,0], locs[:,1])
 plt.show()
 
-print(mag_avg)
+print(num_steps)
