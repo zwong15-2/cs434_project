@@ -96,6 +96,9 @@ def axis_angle_to_matrix(axis, theta):
                   [(ux*uz*(1-np.cos(theta)))-(uy*np.sin(theta)), (uy*uz*(1-np.cos(theta)))+(ux*np.sin(theta)), np.cos(theta)+((uz**2)*(1-np.cos(theta)))]])
     return R
 
+# Integrate gyro data (between 2 steps),
+# multiplying each new delta_R together, starting w/ an initial R
+# The initial R (R_init) is the orientation from the previous step's iteration
 def integrate_gyros(gyro_data, R_init):
     delta_Ri = R_init
     for l in gyro_data:
@@ -107,6 +110,7 @@ def integrate_gyros(gyro_data, R_init):
         delta_Ri = delta_Ri @ new_delta_Ri
     return delta_Ri
 
+# Convert rotation matrix to axis & angle
 def matrix_to_axis_angle(A):
     a,b,c = A[0,0],A[0,1],A[0,2]
     d,e,f = A[1,0],A[1,1],A[1,2]
@@ -133,14 +137,12 @@ R0 = get_init_orientation(init_acc_data)
 acc_times = [row[0] for row in acc_data]
 gyro_times = [row[0] for row in gyro_data]
 
-
-# ---- Filter & count steps from acc_data----
+# Get acc mags, subtract out average mag from them
 acc_data_mags = [magnitude(row) for row in acc_data]
 mag_avg = np.mean(acc_data_mags)
 acc_data_mags = [(mag - mag_avg) for mag in acc_data_mags]
 
-
-# Threshold gives allowed vertical distance between a peak and its surrounding samples
+# ---- Filter & count steps from acc_data----
 filtered_data = low_pass_filter(acc_data_mags)
 (step_indices, props) = find_peaks(filtered_data, threshold=0.0001)
 peaks = [filtered_data[i] for i in step_indices]
@@ -152,24 +154,26 @@ step_times = [acc_data[i][0] for i in step_indices]
 # (pl_step_indices, non_pl_step_indices, pl_peaks, non_pl_peaks) = get_pocket_leg_info(step_indices, filtered_data)
 # plot_range(pl_step_indices, filtered_data)
 
+
+# ---- Track walking direction & next locations step-wise ----
+# Start at origin
 locs = []
 locs.append(np.array([0,0,0]))
+# First delta R is the initial orientation, since successive delta_R's build off of that
 delta_R = R0
 all_gyros = []
-
 # For each 2 successive steps for the leg, ...
 for i in range(len(step_times) - 1):
     # Get all gyro readings between those 2 steps
     gyros = get_gyro_readings_between_times(step_times[i], step_times[i+1])
-    # Integrate those gyro readings and multiply them w/ orientation
+    # Take just x,y,z of gyro readings
     gyros = [gyro[1:] for gyro in gyros]
+    # Integrate those gyro readings and multiply them w/ orientation
     delta_R = integrate_gyros(gyros, delta_R)
     # Express that as axis-angle
     (axis,angle) = matrix_to_axis_angle(delta_R)
-    # Get orthogonal vector -> this is walking direction for that (for now I'm just gonna use the axis)
+    # Get orthogonal vector -> this is walking direction (for now I'm just gonna use the axis)
     walking_dir = np.array(axis)
-    walking_dir = walking_dir / la.norm(walking_dir)
-    print('Axis:', axis, '\t', 'Angle:', angle)
     step_length = get_step_length_from_angle(angle)
     # Multiply that walking direction w/ step length
     disp_of_step = step_length * walking_dir
