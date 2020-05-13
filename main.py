@@ -19,7 +19,7 @@ delta_t = 0.01
 peak_threshold=0.00001
 peak_prominence=1.0
 # Peaks only every 0.25s or more
-peak_distance=0.3/0.01
+peak_distance=0.25/0.01
 
 def read_data(file_name):
     data = []
@@ -201,7 +201,7 @@ def get_nth_max_val(n, data):
     data_no_outliers = list(filter(lambda d: not(d in outliers), data))
     data_no_outliers.sort()
     nth_max = data_no_outliers[len(data_no_outliers) - n]
-    print(nth_max)
+    # print(nth_max)
     return nth_max
 
 def get_upper_limit(data):
@@ -215,19 +215,20 @@ def get_upper_limit(data):
 def find_step_indices(data):
     filtered_data = low_pass_filter(data)
 
+    # Find peaks of initial data, with no parameters
     (step_indices_temp, props) = find_peaks(filtered_data)
     peaks_temp = [filtered_data[i] for i in step_indices_temp]
+    # Get 5th peak
     fifth_max = get_nth_max_val(5, peaks_temp)
 
-    upper_limit = get_upper_limit(filtered_data)
-
-    print(0.6*fifth_max, upper_limit)
+    min_height = 0.75*fifth_max
+    max_height = get_upper_limit(filtered_data)
 
     (step_indices, props) = find_peaks(filtered_data,
                                        threshold=peak_threshold,
                                        prominence=peak_prominence,
                                        distance=peak_distance,
-                                       height=[0.6*fifth_max, upper_limit])
+                                       height=[min_height])
     return (step_indices, filtered_data)
 
 # Plotting all 4 routes side-by-side
@@ -241,6 +242,10 @@ for route in ['1', '2', '3', '4']:
     # ---- Read in data ----
     acc_data = read_data(acc_filename)
     gyro_data = read_data(gyro_filename)
+
+    # Discard first datapoints since they may not be steps
+    acc_data = acc_data[85:]
+    gyro_data = gyro_data[85:]
 
     # Trim down data so they are the same # samples
     min_length = min(len(acc_data), len(gyro_data))
@@ -269,11 +274,12 @@ for route in ['1', '2', '3', '4']:
     step_times = [acc_times[i] for i in step_indices]
     peaks = [filtered_data[i] for i in step_indices]
 
-    # plt.figure(figsize=(16,9))
-    # plt.plot(filtered_data, 'g')
-    # plt.plot(step_indices, peaks, '.')
-    # plt.title('Path ' + route)
-    # plt.show()
+    # if (route == '4'):
+    #     plt.figure(figsize=(16,9))
+    #     plt.plot(filtered_data, 'g')
+    #     plt.plot(step_indices, peaks, '.')
+    #     plt.title('Path ' + route)
+    #     plt.show()
 
     # ---- Track walking direction & next locations step-wise ----
     locs = []
@@ -303,6 +309,7 @@ for route in ['1', '2', '3', '4']:
     plt.axis('equal')
     plt.subplot(plot_index)
     plt.plot(locs[:,0], locs[:,1])
+    plt.plot(locs[len(locs)-1,0],locs[len(locs)-1,1], 'gs')
     plt.title('Route ' + route)
     plot_index += 1
 
