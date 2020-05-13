@@ -18,8 +18,8 @@ delta_t = 0.01
 
 peak_threshold=0.00001
 peak_prominence=1.0
-# Peaks only every 0.25s or more
-peak_distance=0.25/0.01
+# Peaks could probably only happen every 0.3s (at the fastest)
+peak_distance=0.3/0.01
 
 def read_data(file_name):
     data = []
@@ -144,6 +144,11 @@ def matrix_to_axis_angle(A):
 def get_step_length_from_angle(angle):
     return 0.762*angle
 
+def get_step_length_from_angle_2(angle):
+    delta_h = 0.8636 - ((0.8636)*np.cos(angle))
+    step_length = 2 * delta_h * (np.sin(angle)/(1-np.cos(angle)))
+    return step_length
+
 def truncate(n, decimals=0):
     multiplier = 10 ** decimals
     return int(n * multiplier) / multiplier
@@ -243,14 +248,31 @@ for route in ['1', '2', '3', '4']:
     acc_data = read_data(acc_filename)
     gyro_data = read_data(gyro_filename)
 
-    # Discard first datapoints since they may not be steps
-    acc_data = acc_data[85:]
-    gyro_data = gyro_data[85:]
-
     # Trim down data so they are the same # samples
     min_length = min(len(acc_data), len(gyro_data))
     acc_data = acc_data[:min_length]
     gyro_data = gyro_data[:min_length]
+
+    init_acc_data = acc_data[0][1:]
+    R0 = get_init_orientation(init_acc_data)
+
+    print(route)
+
+    # TODO: Dynamically set this cutoff based on actual data / peaks (?)
+    cutoff = 0
+    if (route == '1'):
+        cutoff = 100
+    if (route == '2'):
+        cutoff = 300
+    if (route == '3'):
+        cutoff = 85
+    if (route == '4'):
+        cutoff = 100
+    # cutoff = 0
+
+    # Discard first datapoints since they may not be steps
+    acc_data = acc_data[cutoff:]
+    gyro_data = gyro_data[cutoff:]
 
     # Round times to nearest 0.01 s (regard as constant 100Hz)
     acc_data = [[truncate(row[0], 1), row[1], row[2], row[3]] for row in acc_data]
@@ -258,8 +280,6 @@ for route in ['1', '2', '3', '4']:
     acc_times = [row[0] for row in acc_data]
     gyro_times = [row[0] for row in gyro_data]
 
-    init_acc_data = acc_data[0][1:]
-    R0 = get_init_orientation(init_acc_data)
 
     gyro_data_no_times = [row[1:] for row in gyro_data]
     all_Rs, all_delta_Rs = integrate_all_gyros(gyro_data_no_times, R0)
@@ -274,12 +294,14 @@ for route in ['1', '2', '3', '4']:
     step_times = [acc_times[i] for i in step_indices]
     peaks = [filtered_data[i] for i in step_indices]
 
-    # if (route == '4'):
-    #     plt.figure(figsize=(16,9))
-    #     plt.plot(filtered_data, 'g')
-    #     plt.plot(step_indices, peaks, '.')
-    #     plt.title('Path ' + route)
-    #     plt.show()
+    print(step_times[0])
+
+    # # if (route == '4'):
+    # plt.figure(figsize=(16,9))
+    # plt.plot(filtered_data[500:], 'g')
+    # # plt.plot(step_indices, peaks, '.')
+    # plt.title('Path ' + route)
+    # plt.show()
 
     # ---- Track walking direction & next locations step-wise ----
     locs = []
@@ -297,7 +319,8 @@ for route in ['1', '2', '3', '4']:
             axis = np.array([-1*axis[0], -1*axis[1], axis[2]])
 
         walking_dir = axis
-        step_length = 0.5
+        step_length = get_step_length_from_angle_2(angle)
+        step_length = 1
         disp_of_step = step_length * walking_dir
         locs.append(locs[i] + disp_of_step)
 
