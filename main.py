@@ -4,20 +4,22 @@ import statistics
 import numpy as np
 import numpy.linalg as la
 from scipy.spatial.transform import Rotation as R
-from scipy.signal import butter,filtfilt, find_peaks
+from scipy.signal import butter,filtfilt, find_peaks, lfilter
 
 # Sampling frequency
 f_sampling = 100
 # Nyquist frequency
 f_nyquist = 0.5 * f_sampling
 # Cutoff frequency we want for low-pass filter
-f_cutoff = 2
+f_cutoff = 2.5
 f_cutoff_ratio = f_cutoff / f_nyquist
-order = 2
+order = 5
 delta_t = 0.01
 
-peak_threshold=0.0001
+peak_threshold=0.00001
 peak_prominence=1.0
+# Peaks only every 0.25s or more
+peak_distance=0.3/0.01
 
 def read_data(file_name):
     data = []
@@ -42,14 +44,6 @@ def high_pass_filter(data):
 def magnitude(row):
     return ( (row[1]**2) + (row[2]**2) + (row[3]**2) )**(0.5)
 
-# Used to plot peak indices against a range of acc data (3000,5000)
-def plot_range(step_indices, filtered_data):
-    filtered_step_indices = list(filter(lambda x: x < 5000 and x >= 3000, step_indices))
-    filtered_peaks = [filtered_data[i] for i in filtered_step_indices]
-    plt.plot(range(3000,5000),acc_data_mags[3000:5000])
-    plt.plot(filtered_step_indices, filtered_peaks, 'rs')
-    plt.show()
-
 # Find out which leg has the stronger steps by looking at even / odd peaks
 def get_pocket_leg_info(step_indices, filtered_data):
     even_step_indices = step_indices[0::2]
@@ -57,15 +51,11 @@ def get_pocket_leg_info(step_indices, filtered_data):
     odd_step_indices = step_indices[1::2]
     odd_peaks = [filtered_data[i] for i in odd_step_indices]
 
-    pl_step_indices = even_step_indices
-    non_pl_step_indices = odd_step_indices
-    pl_peaks = even_peaks
-    non_pl_peaks = odd_peaks
+    pl_step_indices, non_pl_step_indices = even_step_indices, odd_step_indices
+    pl_peaks, non_pl_peaks = even_peaks, odd_peaks
     if np.mean(odd_peaks) > np.mean(even_peaks):
-        pl_step_indices = odd_step_indices
-        non_pl_step_indices = even_step_indices
-        pl_peaks = odd_peaks
-        non_pl_peaks = even_peaks
+        pl_step_indices, non_pl_step_indices = odd_step_indices, even_step_indices
+        pl_peaks, non_pl_peaks = odd_peaks, even_peaks
 
     return (pl_step_indices, non_pl_step_indices, pl_peaks, non_pl_peaks)
 
@@ -176,7 +166,7 @@ def project_onto_hor(v):
     proj_onto_hor = proj_onto_hor / la.norm(proj_onto_hor)
     return proj_onto_hor
 
-def get_acc_data_global(acc_data, all_Rs, R0):
+def get_acc_data_global(acc_data, all_Rs):
     acc_data_global = []
     for i in range(len(all_Rs)):
         time = acc_data[i][0]
@@ -191,8 +181,56 @@ def ts_to_index(timestamp):
 def index_to_ts(index):
     return float(index*10)
 
-# Plotting all 4 routes side-by-side
+def find_outliers(data):
+    anomalies = []
+    # Set upper and lower limit to 3 standard deviation
+    data_std = np.std(data)
+    data_mean = np.mean(data)
+    anomaly_cut_off = data_std * 3
+    lower_limit  = data_mean - anomaly_cut_off
+    upper_limit = data_mean + anomaly_cut_off
+    # Generate outliers
+    for outlier in data:
+        if outlier > upper_limit or outlier < lower_limit:
+            anomalies.append(outlier)
+    return anomalies
 
+def get_nth_max_val(n, data):
+    outliers = find_outliers(data)
+    # print(outliers)
+    data_no_outliers = list(filter(lambda d: not(d in outliers), data))
+    data_no_outliers.sort()
+    nth_max = data_no_outliers[len(data_no_outliers) - n]
+    print(nth_max)
+    return nth_max
+
+def get_upper_limit(data):
+    data_std = np.std(data)
+    data_mean = np.mean(data)
+    anomaly_cut_off = data_std * 3
+    lower_limit  = data_mean - anomaly_cut_off
+    upper_limit = data_mean + anomaly_cut_off
+    return upper_limit
+
+def find_step_indices(data):
+    filtered_data = low_pass_filter(data)
+
+    (step_indices_temp, props) = find_peaks(filtered_data)
+    peaks_temp = [filtered_data[i] for i in step_indices_temp]
+    fifth_max = get_nth_max_val(5, peaks_temp)
+
+    upper_limit = get_upper_limit(filtered_data)
+
+    print(0.6*fifth_max, upper_limit)
+
+    (step_indices, props) = find_peaks(filtered_data,
+                                       threshold=peak_threshold,
+                                       prominence=peak_prominence,
+                                       distance=peak_distance,
+                                       height=[0.6*fifth_max, upper_limit])
+    return (step_indices, filtered_data)
+
+# Plotting all 4 routes side-by-side
 plt.figure(figsize=(16,9))
 plot_index = 221
 for route in ['1', '2', '3', '4']:
@@ -220,52 +258,40 @@ for route in ['1', '2', '3', '4']:
 
     gyro_data_no_times = [row[1:] for row in gyro_data]
     all_Rs, all_delta_Rs = integrate_all_gyros(gyro_data_no_times, R0)
-    acc_data_global = get_acc_data_global(acc_data, all_Rs, R0)
-    acc_data_global_zs = [row[3] for row in acc_data_global]
 
-    # Get acc mags, subtract out average mag from them
-    acc_data_mags = [magnitude(row) for row in acc_data]
-    mag_avg = np.mean(acc_data_mags)
-    acc_data_mags = [(mag - mag_avg) for mag in acc_data_mags]
+    acc_data_global = get_acc_data_global(acc_data, all_Rs)
+    acc_data_global_zs = [row[3] for row in acc_data_global]
+    # z_avg = np.mean(acc_data_global_zs)
+    # acc_data_global_zs = [(z - z_avg) for z in acc_data_global_zs]
 
     # ---- Filter & count steps from acc_data----
-    filtered_data = low_pass_filter(acc_data_mags)
-    (step_indices, props) = find_peaks(filtered_data, threshold=peak_threshold, prominence=peak_prominence)
+    (step_indices, filtered_data) = find_step_indices(acc_data_global_zs)
+    step_times = [acc_times[i] for i in step_indices]
     peaks = [filtered_data[i] for i in step_indices]
-    num_steps = len(peaks)
-    print(num_steps)
-    step_times = [acc_data[i][0] for i in step_indices]
 
-    # # Find which of the leg's steps (even / odd) has greater average mag
-    # # This is the pocket leg
-    # (pl_step_indices, non_pl_step_indices, pl_peaks, non_pl_peaks) = get_pocket_leg_info(step_indices, filtered_data)
-    # pl_step_times = [acc_data[i][0] for i in pl_step_indices]
-    # plot_range(pl_step_indices, filtered_data)
-
+    # plt.figure(figsize=(16,9))
+    # plt.plot(filtered_data, 'g')
+    # plt.plot(step_indices, peaks, '.')
+    # plt.title('Path ' + route)
+    # plt.show()
 
     # ---- Track walking direction & next locations step-wise ----
-    # Start at origin
-
     locs = []
     locs.append(np.array([0,0,0]))
-    # First delta R is the initial orientation, since successive delta_R's build off of that
-    delta_R_for_step = R0
-    # For each 2 successive steps for the leg, ...
-
     even = True
-
     for i in range(len(step_times) - 1):
         gyro_delta_Rs = get_gyro_delta_Rs_between_times(step_times[i], step_times[i+1], all_delta_Rs)
         delta_R_for_step = integrate_gyro_delta_Rs(gyro_delta_Rs)
 
         (axis,angle) = matrix_to_axis_angle(delta_R_for_step)
         axis = project_onto_hor(axis)
-        if not(even):
-            axis = np.array([-1*axis[0], -1*axis[1], axis[2]])
         axis = get_perpendicular(axis)
 
+        if not(even):
+            axis = np.array([-1*axis[0], -1*axis[1], axis[2]])
+
         walking_dir = axis
-        step_length = get_step_length_from_angle(angle)
+        step_length = 0.5
         disp_of_step = step_length * walking_dir
         locs.append(locs[i] + disp_of_step)
 
