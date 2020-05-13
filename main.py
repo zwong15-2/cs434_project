@@ -6,6 +6,8 @@ import numpy.linalg as la
 from scipy.spatial.transform import Rotation as R
 from scipy.signal import butter,filtfilt, find_peaks, lfilter
 
+PLOT_ROUTES = True
+
 # Sampling frequency
 f_sampling = 100
 # Nyquist frequency
@@ -224,9 +226,9 @@ def find_step_indices(data):
     (step_indices_temp, props) = find_peaks(filtered_data)
     peaks_temp = [filtered_data[i] for i in step_indices_temp]
     # Get 5th peak
-    fifth_max = get_nth_max_val(5, peaks_temp)
+    nth_max = get_nth_max_val(5, peaks_temp)
 
-    min_height = 0.75*fifth_max
+    min_height = 0.75*nth_max
     max_height = get_upper_limit(filtered_data)
 
     (step_indices, props) = find_peaks(filtered_data,
@@ -237,9 +239,10 @@ def find_step_indices(data):
     return (step_indices, filtered_data)
 
 # Plotting all 4 routes side-by-side
-plt.figure(figsize=(16,9))
-plot_index = 221
-for route in ['1', '2', '3', '4']:
+if (PLOT_ROUTES):
+    plt.figure(figsize=(16,9))
+plot_index = 241
+for route in ['1', '2', '3', '4', 'Zach1', 'Zach2', 'Frank1', 'Frank2']:
 
     acc_filename = './data_imu_loc/route' + route + '/Accelerometer.csv'
     gyro_filename = './data_imu_loc/route' + route + '/Gyroscope.csv'
@@ -255,6 +258,8 @@ for route in ['1', '2', '3', '4']:
 
     init_acc_data = acc_data[0][1:]
     R0 = get_init_orientation(init_acc_data)
+    gyro_data_no_times = [row[1:] for row in gyro_data]
+    all_Rs, all_delta_Rs = integrate_all_gyros(gyro_data_no_times, R0)
 
     print(route)
 
@@ -268,21 +273,18 @@ for route in ['1', '2', '3', '4']:
         cutoff = 85
     if (route == '4'):
         cutoff = 100
-    # cutoff = 0
+    cutoff = 0
 
     # Discard first datapoints since they may not be steps
     acc_data = acc_data[cutoff:]
     gyro_data = gyro_data[cutoff:]
+    all_Rs = all_Rs[cutoff:]
 
     # Round times to nearest 0.01 s (regard as constant 100Hz)
     acc_data = [[truncate(row[0], 1), row[1], row[2], row[3]] for row in acc_data]
     gyro_data = [[truncate(row[0], 1), row[1], row[2], row[3]] for row in gyro_data]
     acc_times = [row[0] for row in acc_data]
     gyro_times = [row[0] for row in gyro_data]
-
-
-    gyro_data_no_times = [row[1:] for row in gyro_data]
-    all_Rs, all_delta_Rs = integrate_all_gyros(gyro_data_no_times, R0)
 
     acc_data_global = get_acc_data_global(acc_data, all_Rs)
     acc_data_global_zs = [row[3] for row in acc_data_global]
@@ -296,12 +298,14 @@ for route in ['1', '2', '3', '4']:
 
     print(step_times[0])
 
-    # # if (route == '4'):
-    # plt.figure(figsize=(16,9))
-    # plt.plot(filtered_data[500:], 'g')
-    # # plt.plot(step_indices, peaks, '.')
-    # plt.title('Path ' + route)
-    # plt.show()
+    if not(PLOT_ROUTES):
+        plt.figure(figsize=(16,9))
+        plt.plot(filtered_data[:5000], 'g')
+        step_ind_filt = list(filter(lambda x: x < 5000, step_indices))
+        peaks_filt = [filtered_data[i] for i in step_ind_filt]
+        plt.plot(step_ind_filt, peaks_filt, '.')
+        plt.title('Path ' + route)
+        plt.show()
 
     # ---- Track walking direction & next locations step-wise ----
     locs = []
@@ -315,12 +319,12 @@ for route in ['1', '2', '3', '4']:
         axis = project_onto_hor(axis)
         axis = get_perpendicular(axis)
 
-        if not(even):
+        if (even):
             axis = np.array([-1*axis[0], -1*axis[1], axis[2]])
 
         walking_dir = axis
         step_length = get_step_length_from_angle_2(angle)
-        step_length = 1
+        # step_length = 1
         disp_of_step = step_length * walking_dir
         locs.append(locs[i] + disp_of_step)
 
@@ -328,12 +332,13 @@ for route in ['1', '2', '3', '4']:
 
     # Plot all 4 routes side-by-side (as 4 subplots)
 
-    locs = np.array(locs)
-    plt.axis('equal')
-    plt.subplot(plot_index)
-    plt.plot(locs[:,0], locs[:,1])
-    plt.plot(locs[len(locs)-1,0],locs[len(locs)-1,1], 'gs')
-    plt.title('Route ' + route)
-    plot_index += 1
+    if (PLOT_ROUTES):
+        locs = np.array(locs)
+        plt.axis('equal')
+        plt.subplot(plot_index)
+        plt.plot(locs[:,0], locs[:,1])
+        plt.plot(locs[len(locs)-1,0],locs[len(locs)-1,1], 'gs')
+        plt.title('Route ' + route)
+        plot_index += 1
 
 plt.show()
