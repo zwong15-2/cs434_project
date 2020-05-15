@@ -9,7 +9,7 @@ from scipy.signal import butter,filtfilt, find_peaks, lfilter
 PLOT_ROUTES = True
 PLOT_ROUTES_SAME = True
 PLOT_COLORS = ['blue', 'orange', 'green', 'red', 'cyan', 'magenta', 'black']
-TESTING = False
+TESTING = True
 
 # Sampling frequency
 f_sampling = 100
@@ -21,7 +21,7 @@ f_cutoff_low_ratio = f_cutoff_low / f_nyquist
 # Cutoff frequency we want for high-pass filter
 f_cutoff_high = 2
 f_cutoff_high_ratio = f_cutoff_high / f_nyquist
-order = 5
+order = 2
 delta_t = 0.01
 
 peak_threshold=0.00001
@@ -128,6 +128,8 @@ def matrix_to_axis_angle(A):
 
 # Use both angle and time to inform step length
 def get_step_length(angle, time):
+    angle = np.abs(angle)
+    time = np.abs(time)
     time = time/1000
     return (0.762*angle) +(0.25/(time**2))
 
@@ -141,9 +143,13 @@ def get_step_length_1(time):
 # EAAR approach: get dh of head, use that to inform step length
 # Maybe not applicable since IMU not on head
 def get_step_length_2(angle):
+    angle = np.abs(angle)
     delta_h = 0.8636 - ((0.8636)*np.cos(angle))
     step_length = 2 * delta_h * (np.sin(angle)/(1-np.cos(angle)))
     return step_length
+
+def get_step_length_3(angle):
+    return 0.762*np.abs(angle)
 
 # Used to round each timestamp down to the nearest 0.01s
 def truncate(n, decimals=0):
@@ -231,6 +237,23 @@ def moving_average(data):
             moving_aves.append(moving_ave)
     return moving_aves
 
+def get_ave_separation(indices):
+    total = 0
+    count = 0
+    for i in range(len(indices)-1):
+        total += (indices[i+1] - indices[i])
+        count += 1
+    return total / count
+
+def insert_new_indices(indices, ave_sep):
+    for i in range(len(indices)-1):
+        if (indices[i+1] - indices[i]) >= (1.7*ave_sep):
+            # Insert new index between these
+            new_index = (indices[i+1] + indices[i])/2
+            indices = np.insert(indices, i+1, new_index)
+
+    return indices
+
 # Detect step indices of filtered data
 def find_step_indices(filtered_data):
     # Find peaks of initial data, with no parameters
@@ -240,6 +263,7 @@ def find_step_indices(filtered_data):
     # Get 5th peak
     # We will require minimum peak height to be some fraction of this 5th peak's height
     # (Optionally) require a maximum peak height (calculated using std. dev)
+        # For now, don't constrain max. height. We want to include huge peaks as they may be steps
     nth_max = get_nth_max_val(5, peaks_temp)
     min_height = 0.75*nth_max
     max_height = get_upper_limit(filtered_data)
@@ -249,6 +273,10 @@ def find_step_indices(filtered_data):
                                        prominence=peak_prominence,
                                        distance=peak_distance,
                                        height=[min_height])
+
+    # ave_sep = get_ave_separation(step_indices)
+    # step_indices = insert_new_indices(step_indices, ave_sep)
+
     return step_indices
 
 def plot_route_separate(locs, plot_index, route):
@@ -257,19 +285,27 @@ def plot_route_separate(locs, plot_index, route):
     p = plt.subplot(plot_index)
     plt.plot(locs[:,0], locs[:,1])
     plt.plot(0, 0, 'gs')
-    # p.set_xlabel('X position (m)')
-    # p.set_ylabel('Y position (m)')
     plt.title('Route ' + route)
 
 def plot_route_same(locs, plot_index, route):
     locs = np.array(locs)
     plot_color = PLOT_COLORS[plot_index]
-    plt.plot(locs[:,0], locs[:,1], color=plot_color)
+    plt.plot(locs[:,0], locs[:,1], color=plot_color, label=route)
     return
 
+def plot_data_w_peaks(filtered_data, step_indices, peaks):
+    plt.figure(figsize=(16,9))
+    plt.plot(filtered_data, 'g')
+    plt.plot(step_indices, peaks, '.')
+    plt.title('Path ' + route)
+    plt.show()
+
 def write_trajectory_to_file(locs, index, route_name):
-    path = './testing/'
-    path = './training/'
+    path = ''
+    if TESTING:
+        path = './testing/'
+    else:
+        path = './training/'
     file_name = route_name + '.txt'
     total_path = path + file_name
     f = open(total_path, 'w+')
@@ -284,6 +320,7 @@ if TESTING:
 # TRAINING
 else:
     routes = ['1', '2', '3', '4']
+labels = [('Route ' + route) for route in routes]
 
 plot_index = 0
 if PLOT_ROUTES:
@@ -344,15 +381,7 @@ for route in routes:
     print(step_times[0])
 
     if not(PLOT_ROUTES):
-        plt.figure(figsize=(16,9))
-        # plt.plot(filtered_data[:5000], 'g')
-        plt.plot(filtered_data, 'g')
-        # step_ind_filt = list(filter(lambda x: x < 5000, step_indices))
-        step_ind_filt = step_indices
-        # peaks_filt = [filtered_data[i] for i in step_ind_filt]
-        # plt.plot(step_ind_filt, peaks_filt, '.')
-        plt.title('Path ' + route)
-        plt.show()
+        plot_data_w_peaks(filtered_data, step_indices, peaks)
 
     # ---- Track walking direction & next locations step-wise ----
     locs = []
@@ -380,13 +409,11 @@ for route in routes:
         locs.append(locs[i] + disp_of_step)
 
         times_between_steps.append(time_between_steps)
-
         even = not(even)
 
     print(np.mean(times_between_steps[:20])/1000)
 
     write_trajectory_to_file(locs, index, route)
-
     # Plot routes
     if PLOT_ROUTES:
         if PLOT_ROUTES_SAME:
@@ -397,4 +424,7 @@ for route in routes:
 
     index += 1
 
-plt.show()
+if PLOT_ROUTES:
+    if PLOT_ROUTES_SAME:
+        plt.legend(labels)
+    plt.show()
